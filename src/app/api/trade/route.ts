@@ -22,6 +22,17 @@ export async function GET(req: NextRequest) {
 
   const userId = session.user.id;
 
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { riskAcknowledgedAt: true },
+  });
+  if (!user?.riskAcknowledgedAt) {
+    return NextResponse.json(
+      { message: "请先确认风险告知书" },
+      { status: 403 }
+    );
+  }
+
   try {
     const [account, positions, orders] = await Promise.all([
       prisma.virtualAccount.findUnique({ where: { userId } }),
@@ -102,6 +113,17 @@ export async function POST(req: NextRequest) {
   }
 
   const userId = session.user.id;
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { riskAcknowledgedAt: true },
+  });
+  if (!user?.riskAcknowledgedAt) {
+    return NextResponse.json(
+      { message: "请先确认风险告知书" },
+      { status: 403 }
+    );
+  }
 
   try {
     const body = await req.json();
@@ -197,10 +219,7 @@ export async function POST(req: NextRequest) {
         // 扣减现金
         await tx.virtualAccount.update({
           where: { userId },
-          data: {
-            balance: { decrement: netAmount },
-            totalAssets: { decrement: fee + tax },
-          },
+          data: { balance: { decrement: netAmount } },
         });
 
         // 更新持仓
@@ -220,6 +239,28 @@ export async function POST(req: NextRequest) {
             quantity: newPos.quantity,
             marketValue: latestClose * newPos.quantity,
           },
+        });
+
+        // 重新计算总资产 = 最新现金 + 所有持仓市值
+        const [accountAfter, mktValRows] = await Promise.all([
+          tx.virtualAccount.findUnique({
+            where: { userId },
+            select: { balance: true },
+          }),
+          tx.position.findMany({
+            where: { userId, quantity: { gt: 0 } },
+            select: { marketValue: true },
+          }),
+        ]);
+        const totalMktVal = mktValRows.reduce(
+          (sum, p) => sum + Number(p.marketValue),
+          0
+        );
+        const totalAssets = Number(accountAfter!.balance) + totalMktVal;
+
+        await tx.virtualAccount.update({
+          where: { userId },
+          data: { totalAssets },
         });
 
         // 创建委托单（已成交）
@@ -299,6 +340,28 @@ export async function POST(req: NextRequest) {
             where: { userId_stockCode: { userId, stockCode } },
           });
         }
+
+        // 重新计算总资产 = 最新现金 + 所有持仓市值
+        const [accountAfter, mktValRows] = await Promise.all([
+          tx.virtualAccount.findUnique({
+            where: { userId },
+            select: { balance: true },
+          }),
+          tx.position.findMany({
+            where: { userId, quantity: { gt: 0 } },
+            select: { marketValue: true },
+          }),
+        ]);
+        const totalMktVal = mktValRows.reduce(
+          (sum, p) => sum + Number(p.marketValue),
+          0
+        );
+        const totalAssets = Number(accountAfter!.balance) + totalMktVal;
+
+        await tx.virtualAccount.update({
+          where: { userId },
+          data: { totalAssets },
+        });
 
         // 创建委托单
         await tx.order.create({
