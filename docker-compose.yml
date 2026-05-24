@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: caiya-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-caiya}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-caiya_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-caiya}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

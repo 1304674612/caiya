@@ -1,0 +1,314 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── NextAuth v5 核心表 ───────────────────────────────────────
+
+model User {
+  id                String    @id @default(cuid())
+  name              String?
+  email             String?   @unique
+  emailVerified     DateTime?
+  image             String?
+  hashedPassword    String?
+  role              String    @default("user") // user | admin | moderator
+  riskAcknowledgedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  accounts          Account[]
+  sessions          Session[]
+  virtualAccounts   VirtualAccount[]
+  orders            Order[]
+  positions         Position[]
+  transactions      Transaction[]
+  posts             Post[]
+  comments          Comment[]
+  apiKeys           UserApiKey[]
+  strategies        Strategy[]
+  complianceLogs    ComplianceLog[]
+  auditActions      AuditTrail[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── 虚拟交易 ─────────────────────────────────────────────────
+
+model VirtualAccount {
+  id          String   @id @default(cuid())
+  userId      String
+  balance     Decimal  @default(200000) @db.Decimal(15, 2)
+  totalAssets Decimal  @default(200000) @db.Decimal(15, 2)
+  dailyPnl    Decimal  @default(0) @db.Decimal(15, 2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+}
+
+model Order {
+  id        String    @id @default(cuid())
+  userId    String
+  stockCode String
+  stockName String?
+  type      String    // buy | sell
+  price     Decimal   @db.Decimal(10, 3)
+  quantity  Int
+  status    String    @default("pending") // pending | filled | cancelled
+  fee       Decimal   @default(0) @db.Decimal(10, 2) // 手续费
+  tax       Decimal   @default(0) @db.Decimal(10, 2) // 印花税
+  filledAt  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([stockCode])
+}
+
+model Position {
+  id          String   @id @default(cuid())
+  userId      String
+  stockCode   String
+  stockName   String?
+  avgCost     Decimal  @db.Decimal(10, 3)
+  quantity    Int
+  marketValue Decimal  @default(0) @db.Decimal(15, 2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, stockCode])
+}
+
+model Transaction {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   // buy | sell | deposit | withdraw
+  amount    Decimal  @db.Decimal(15, 2)
+  stockCode String?
+  stockName String?
+  price     Decimal? @db.Decimal(10, 3)
+  quantity  Int?
+  fee       Decimal  @default(0) @db.Decimal(10, 2)
+  tax       Decimal  @default(0) @db.Decimal(10, 2)
+  orderId   String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([orderId])
+}
+
+// ─── 论坛 ─────────────────────────────────────────────────────
+
+model Post {
+  id        String    @id @default(cuid())
+  title     String
+  content   String    @db.Text
+  category  String    @default("discussion") // discussion | review | blog
+  tags      String[]  @default([])
+  status    String    @default("pending") // pending | published | hidden
+  authorId  String
+  tradeInfo Json?     // 关联的交易信息 {stockCode, type, price, quantity}
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  author   User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments Comment[]
+
+  @@index([authorId])
+  @@index([category, status])
+  @@index([createdAt])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  content   String   @db.Text
+  postId    String
+  authorId  String
+  parentId  String?  // 回复某条评论
+  status    String   @default("published") // published | hidden
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  post     Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author   User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies  Comment[] @relation("CommentReplies")
+
+  @@index([postId])
+  @@index([authorId])
+}
+
+// ─── 行情数据 ─────────────────────────────────────────────────
+
+model StockDaily {
+  id       String   @id @default(cuid())
+  code     String
+  date     DateTime @db.Date
+  open     Decimal  @db.Decimal(10, 3)
+  high     Decimal  @db.Decimal(10, 3)
+  low      Decimal  @db.Decimal(10, 3)
+  close    Decimal  @db.Decimal(10, 3)
+  volume   BigInt
+  amount   Decimal? @db.Decimal(18, 2)
+  adjusted Boolean  @default(false) // 是否已复权
+
+  @@unique([code, date])
+  @@index([code])
+  @@index([date])
+}
+
+model StockIntraday {
+  id       String   @id @default(cuid())
+  code     String
+  datetime DateTime
+  open     Decimal  @db.Decimal(10, 3)
+  high     Decimal  @db.Decimal(10, 3)
+  low      Decimal  @db.Decimal(10, 3)
+  close    Decimal  @db.Decimal(10, 3)
+  volume   BigInt
+
+  @@unique([code, datetime])
+  @@index([code])
+  @@index([datetime])
+}
+
+model DataSyncLog {
+  id         String   @id @default(uuid())
+  source     String   // akshare | tushare | other
+  dataType   String   // daily | intraday
+  success    Boolean
+  recordsIn  Int      @default(0)
+  message    String?  @db.Text
+  startedAt  DateTime
+  finishedAt DateTime
+  createdAt  DateTime @default(now())
+}
+
+// ─── AI 相关 ──────────────────────────────────────────────────
+
+model UserApiKey {
+  id         String    @id @default(cuid())
+  userId     String
+  provider   String    // openai | claude | custom
+  ciphertext String
+  iv         String
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+}
+
+model Strategy {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  rules     Json     // 策略规则 JSON
+  status    String   @default("draft") // draft | active | archived
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  backtestResults  BacktestResult[]
+
+  @@index([userId])
+}
+
+model BacktestResult {
+  id           String   @id @default(cuid())
+  strategyId   String
+  startDate    DateTime @db.Date
+  endDate      DateTime @db.Date
+  totalReturn  Decimal  @db.Decimal(8, 4) // 总收益率
+  annualReturn Decimal? @db.Decimal(8, 4) // 年化收益率
+  maxDrawdown  Decimal  @db.Decimal(8, 4) // 最大回撤
+  sharpeRatio  Decimal? @db.Decimal(8, 4) // 夏普比率
+  winRate      Decimal? @db.Decimal(8, 4) // 胜率
+  totalTrades  Int      @default(0)
+  trades       Json?    // 每笔交易明细
+  equityCurve  Json?    // 权益曲线数据
+  version      Int      @default(1) // 版本号
+  createdAt    DateTime @default(now())
+
+  strategy Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  @@index([strategyId])
+}
+
+// ─── 合规与审计 ───────────────────────────────────────────────
+
+model ComplianceLog {
+  id              String   @id @default(cuid())
+  userId          String
+  messageKey      String   // risk_disclaimer | ai_policy | terms_of_service
+  messageVersion  String   @default("1.0")
+  acknowledgedAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageKey])
+  @@index([userId])
+}
+
+model AuditTrail {
+  id        String   @id @default(cuid())
+  actorId   String
+  action    String   // post_hide | comment_delete | user_ban | admin_create
+  targetId  String?
+  targetType String? // post | comment | user
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  actor User @relation(fields: [actorId], references: [id])
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+}
