@@ -23,36 +23,42 @@ export default async function DashboardPage() {
   const balance = account ? Number(account.balance) : 0;
   const totalAssets = account ? Number(account.totalAssets) : 0;
 
+  // 批量获取最新价，避免 N+1
+  const codes = positions.map((p) => p.stockCode);
+  const latestPrices =
+    codes.length > 0
+      ? await prisma.$queryRaw<Array<{ code: string; close: number }>>`
+          SELECT DISTINCT ON (code) code, close FROM "StockDaily"
+          WHERE code = ANY(${codes}::text[])
+          ORDER BY code, date DESC
+        `
+      : [];
+
+  const priceMap = new Map(latestPrices.map((r) => [r.code, Number(r.close)]));
+
   // 计算持仓汇总
   let totalMarketValue = 0;
   let totalPnl = 0;
   let totalCost = 0;
-  const positionDetails = await Promise.all(
-    positions.map(async (pos) => {
-      const latest = await prisma.stockDaily.findFirst({
-        where: { code: pos.stockCode },
-        orderBy: { date: "desc" },
-        select: { close: true },
-      });
-      const currentPrice = latest ? Number(latest.close) : 0;
-      const cost = Number(pos.avgCost) * pos.quantity;
-      const mktVal = currentPrice * pos.quantity;
-      const pnl = mktVal - cost;
-      totalMarketValue += mktVal;
-      totalPnl += pnl;
-      totalCost += cost;
-      return {
-        code: pos.stockCode,
-        name: pos.stockName,
-        avgCost: Number(pos.avgCost),
-        quantity: pos.quantity,
-        currentPrice,
-        marketValue: mktVal,
-        pnl,
-        pnlRate: cost > 0 ? (pnl / cost) * 100 : 0,
-      };
-    })
-  );
+  const positionDetails = positions.map((pos) => {
+    const currentPrice = priceMap.get(pos.stockCode) || 0;
+    const cost = Number(pos.avgCost) * pos.quantity;
+    const mktVal = currentPrice * pos.quantity;
+    const pnl = mktVal - cost;
+    totalMarketValue += mktVal;
+    totalPnl += pnl;
+    totalCost += cost;
+    return {
+      code: pos.stockCode,
+      name: pos.stockName,
+      avgCost: Number(pos.avgCost),
+      quantity: pos.quantity,
+      currentPrice,
+      marketValue: mktVal,
+      pnl,
+      pnlRate: cost > 0 ? (pnl / cost) * 100 : 0,
+    };
+  });
 
   const pnlRate = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
 

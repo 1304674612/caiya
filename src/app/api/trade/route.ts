@@ -33,34 +33,39 @@ export async function GET(req: NextRequest) {
       }),
     ]);
 
+    // 批量获取最新价，避免 N+1
+    const codes = positions.map((p) => p.stockCode);
+    const latestPrices =
+      codes.length > 0
+        ? await prisma.$queryRaw<Array<{ code: string; close: number }>>`
+            SELECT DISTINCT ON (code) code, close FROM "StockDaily"
+            WHERE code = ANY(${codes}::text[])
+            ORDER BY code, date DESC
+          `
+        : [];
+
+    const priceMap = new Map(latestPrices.map((r) => [r.code, Number(r.close)]));
+
     // 为每个持仓补充现价和盈亏
-    const positionsWithPnl = await Promise.all(
-      positions.map(async (pos) => {
-        const latest = await prisma.stockDaily.findFirst({
-          where: { code: pos.stockCode },
-          orderBy: { date: "desc" },
-          select: { close: true },
-        });
+    const positionsWithPnl = positions.map((pos) => {
+      const currentPrice = priceMap.get(pos.stockCode) || 0;
+      const { pnl, pnlRate } = calcPnl(
+        Number(pos.avgCost),
+        currentPrice,
+        pos.quantity
+      );
 
-        const currentPrice = latest ? Number(latest.close) : 0;
-        const { pnl, pnlRate } = calcPnl(
-          Number(pos.avgCost),
-          currentPrice,
-          pos.quantity
-        );
-
-        return {
-          stockCode: pos.stockCode,
-          stockName: pos.stockName,
-          avgCost: Number(pos.avgCost),
-          quantity: pos.quantity,
-          currentPrice,
-          marketValue: currentPrice * pos.quantity,
-          pnl,
-          pnlRate,
-        };
-      })
-    );
+      return {
+        stockCode: pos.stockCode,
+        stockName: pos.stockName,
+        avgCost: Number(pos.avgCost),
+        quantity: pos.quantity,
+        currentPrice,
+        marketValue: currentPrice * pos.quantity,
+        pnl,
+        pnlRate,
+      };
+    });
 
     return NextResponse.json({
       account: account

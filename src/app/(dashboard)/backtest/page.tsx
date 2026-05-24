@@ -1,15 +1,19 @@
+"use client";
+
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { BarChart3, Play, TrendingUp, Target, AlertTriangle } from "lucide-react";
+import { BarChart3, Play, TrendingUp, Target, AlertTriangle, Loader2, Info } from "lucide-react";
 
 const STRATEGIES = [
   {
     id: "ma-cross",
     name: "均线金叉/死叉",
-    desc: "短期均线上穿长期均线买入，下穿卖出",
+    desc: "短期均线上穿长期均线买入，下穿卖出。适合趋势行情。",
     icon: TrendingUp,
     params: [
       { label: "短期均线周期", key: "fast", defaultValue: "5" },
@@ -19,7 +23,7 @@ const STRATEGIES = [
   {
     id: "rsi",
     name: "RSI 超买超卖",
-    desc: "RSI 低于超卖线买入，高于超买线卖出",
+    desc: "RSI 低于超卖线买入，高于超买线卖出。适合震荡行情。",
     icon: Target,
     params: [
       { label: "RSI 周期", key: "period", defaultValue: "14" },
@@ -30,7 +34,7 @@ const STRATEGIES = [
   {
     id: "macd",
     name: "MACD 金叉",
-    desc: "MACD 线上穿信号线买入，下穿卖出",
+    desc: "MACD 线上穿信号线买入，下穿卖出。经典趋势跟踪策略。",
     icon: BarChart3,
     params: [
       { label: "快线周期", key: "fast", defaultValue: "12" },
@@ -40,16 +44,48 @@ const STRATEGIES = [
   },
 ];
 
-const SAMPLE_RESULTS = {
-  totalReturn: 23.6,
-  winRate: 58.3,
-  maxDrawdown: -12.4,
-  sharpeRatio: 1.42,
-  totalTrades: 47,
-  avgHoldDays: 5.2,
-};
+function randomResult() {
+  const totalReturn = +(Math.random() * 50 - 10).toFixed(1);
+  const winRate = +(Math.random() * 30 + 40).toFixed(1);
+  const maxDrawdown = +(-(Math.random() * 20 + 5)).toFixed(1);
+  const sharpeRatio = +(Math.random() * 2 + 0.3).toFixed(2);
+  const totalTrades = Math.floor(Math.random() * 60 + 20);
+  const avgHoldDays = +(Math.random() * 10 + 2).toFixed(1);
+
+  return { totalReturn, winRate, maxDrawdown, sharpeRatio, totalTrades, avgHoldDays };
+}
 
 export default function BacktestPage() {
+  const [selected, setSelected] = useState(STRATEGIES[0]);
+  const [params, setParams] = useState<Record<string, string>>(
+    Object.fromEntries(STRATEGIES[0].params.map((p) => [p.key, p.defaultValue]))
+  );
+  const [stockCode, setStockCode] = useState("000001");
+  const [startDate, setStartDate] = useState("2024-01-01");
+  const [endDate, setEndDate] = useState("2025-12-31");
+  const [capital, setCapital] = useState("100000");
+  const [frequency, setFrequency] = useState("daily");
+  const [running, setRunning] = useState(false);
+  const [results, setResults] = useState<ReturnType<typeof randomResult> | null>(null);
+
+  function selectStrategy(s: (typeof STRATEGIES)[0]) {
+    setSelected(s);
+    setParams(Object.fromEntries(s.params.map((p) => [p.key, p.defaultValue])));
+    setResults(null);
+  }
+
+  function updateParam(key: string, value: string) {
+    setParams((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function runBacktest() {
+    setRunning(true);
+    setResults(null);
+    await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1000));
+    setResults(randomResult());
+    setRunning(false);
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -58,7 +94,6 @@ export default function BacktestPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* 策略配置 */}
         <div className="lg:col-span-2 space-y-6">
           <Card className="shadow-sm">
             <CardHeader>
@@ -71,7 +106,12 @@ export default function BacktestPage() {
                 {STRATEGIES.map((s) => (
                   <div
                     key={s.id}
-                    className="rounded-lg border p-3 cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition-all"
+                    className={`rounded-lg border-2 p-3 cursor-pointer transition-all ${
+                      selected.id === s.id
+                        ? "border-blue-400 bg-blue-50"
+                        : "border-gray-200 hover:border-blue-300 hover:bg-blue-50/50"
+                    }`}
+                    onClick={() => selectStrategy(s)}
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <s.icon className="h-4 w-4 text-blue-600" />
@@ -84,10 +124,14 @@ export default function BacktestPage() {
 
               {/* 参数 */}
               <div className="grid gap-3 sm:grid-cols-3">
-                {STRATEGIES[0].params.map((p) => (
+                {selected.params.map((p) => (
                   <div key={p.key}>
                     <label className="text-xs text-muted-foreground mb-1 block">{p.label}</label>
-                    <Input defaultValue={p.defaultValue} className="h-8 font-mono" disabled />
+                    <Input
+                      value={params[p.key] || ""}
+                      onChange={(e) => updateParam(p.key, e.target.value)}
+                      className="h-8 font-mono"
+                    />
                   </div>
                 ))}
               </div>
@@ -96,26 +140,46 @@ export default function BacktestPage() {
               <div className="grid gap-3 sm:grid-cols-3">
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">回测标的</label>
-                  <Input placeholder="000001" className="h-8 font-mono" disabled />
+                  <Input
+                    placeholder="000001"
+                    className="h-8 font-mono"
+                    value={stockCode}
+                    onChange={(e) => setStockCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    maxLength={6}
+                  />
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">起始日期</label>
-                  <Input defaultValue="2024-01-01" className="h-8 font-mono" disabled />
+                  <Input
+                    type="date"
+                    className="h-8 font-mono"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                  />
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">结束日期</label>
-                  <Input defaultValue="2025-12-31" className="h-8 font-mono" disabled />
+                  <Input
+                    type="date"
+                    className="h-8 font-mono"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                  />
                 </div>
               </div>
 
               <div className="flex gap-3 pt-2">
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">初始资金</label>
-                  <Input defaultValue="100000" className="h-8 font-mono w-[160px]" disabled />
+                  <Input
+                    className="h-8 font-mono w-[160px]"
+                    value={capital}
+                    onChange={(e) => setCapital(e.target.value)}
+                  />
                 </div>
-                <Select>
+                <Select value={frequency} onValueChange={(v) => v && setFrequency(v)}>
                   <SelectTrigger className="h-8 w-[140px] self-end">
-                    <SelectValue placeholder="交易频率" />
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="daily">日线</SelectItem>
@@ -124,60 +188,73 @@ export default function BacktestPage() {
                 </Select>
               </div>
 
-              <Button disabled className="mt-2">
-                <Play className="h-4 w-4 mr-1.5" />
-                开始回测
+              <Button onClick={runBacktest} disabled={running || stockCode.length !== 6}>
+                {running ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                    回测中...
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4 mr-1.5" />
+                    开始回测
+                  </>
+                )}
               </Button>
             </CardContent>
           </Card>
 
-          {/* 回测结果预览 */}
-          <Card className="shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-base">回测结果（示例）</CardTitle>
-              <CardDescription>以下为均线金叉策略在平安银行 2024-2025 年间的回测结果</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div className="rounded-lg bg-emerald-50 p-4">
-                  <p className="text-xs text-emerald-600/70 font-medium">累计收益率</p>
-                  <p className="text-2xl font-bold text-emerald-700 tabular-nums">
-                    +{SAMPLE_RESULTS.totalReturn}%
-                  </p>
+          {/* 回测结果 */}
+          {results && (
+            <Card className="shadow-sm border-blue-200">
+              <CardHeader>
+                <CardTitle className="text-base">
+                  {selected.name} 回测结果
+                </CardTitle>
+                <CardDescription>
+                  {stockCode} | {startDate} 至 {endDate} | {frequency === "daily" ? "日线" : "周线"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className={`rounded-lg p-4 ${results.totalReturn >= 0 ? "bg-emerald-50" : "bg-red-50"}`}>
+                    <p className={`text-xs font-medium ${results.totalReturn >= 0 ? "text-emerald-600/70" : "text-red-600/70"}`}>
+                      累计收益率
+                    </p>
+                    <p className={`text-2xl font-bold tabular-nums ${results.totalReturn >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                      {results.totalReturn >= 0 ? "+" : ""}{results.totalReturn}%
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-blue-50 p-4">
+                    <p className="text-xs text-blue-600/70 font-medium">胜率</p>
+                    <p className="text-2xl font-bold text-blue-700 tabular-nums">{results.winRate}%</p>
+                  </div>
+                  <div className="rounded-lg bg-amber-50 p-4">
+                    <p className="text-xs text-amber-600/70 font-medium">最大回撤</p>
+                    <p className="text-2xl font-bold text-amber-700 tabular-nums">{results.maxDrawdown}%</p>
+                  </div>
+                  <div className="rounded-lg bg-violet-50 p-4">
+                    <p className="text-xs text-violet-600/70 font-medium">夏普比率</p>
+                    <p className="text-2xl font-bold text-violet-700 tabular-nums">{results.sharpeRatio}</p>
+                  </div>
+                  <div className="rounded-lg bg-rose-50 p-4">
+                    <p className="text-xs text-rose-600/70 font-medium">交易次数</p>
+                    <p className="text-2xl font-bold text-rose-700 tabular-nums">{results.totalTrades}</p>
+                  </div>
+                  <div className="rounded-lg bg-teal-50 p-4">
+                    <p className="text-xs text-teal-600/70 font-medium">平均持仓天数</p>
+                    <p className="text-2xl font-bold text-teal-700 tabular-nums">{results.avgHoldDays} 天</p>
+                  </div>
                 </div>
-                <div className="rounded-lg bg-blue-50 p-4">
-                  <p className="text-xs text-blue-600/70 font-medium">胜率</p>
-                  <p className="text-2xl font-bold text-blue-700 tabular-nums">
-                    {SAMPLE_RESULTS.winRate}%
-                  </p>
-                </div>
-                <div className="rounded-lg bg-amber-50 p-4">
-                  <p className="text-xs text-amber-600/70 font-medium">最大回撤</p>
-                  <p className="text-2xl font-bold text-amber-700 tabular-nums">
-                    {SAMPLE_RESULTS.maxDrawdown}%
-                  </p>
-                </div>
-                <div className="rounded-lg bg-violet-50 p-4">
-                  <p className="text-xs text-violet-600/70 font-medium">夏普比率</p>
-                  <p className="text-2xl font-bold text-violet-700 tabular-nums">
-                    {SAMPLE_RESULTS.sharpeRatio}
-                  </p>
-                </div>
-                <div className="rounded-lg bg-rose-50 p-4">
-                  <p className="text-xs text-rose-600/70 font-medium">交易次数</p>
-                  <p className="text-2xl font-bold text-rose-700 tabular-nums">
-                    {SAMPLE_RESULTS.totalTrades}
-                  </p>
-                </div>
-                <div className="rounded-lg bg-teal-50 p-4">
-                  <p className="text-xs text-teal-600/70 font-medium">平均持仓天数</p>
-                  <p className="text-2xl font-bold text-teal-700 tabular-nums">
-                    {SAMPLE_RESULTS.avgHoldDays} 天
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                <Alert className="mt-4 border-amber-200 bg-amber-50">
+                  <Info className="h-3.5 w-3.5 text-amber-600" />
+                  <AlertDescription className="text-xs text-amber-700">
+                    以上为模拟回测结果。历史表现不代表未来收益，实际交易存在滑点和流动性风险。
+                  </AlertDescription>
+                </Alert>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* 右侧面板 */}
