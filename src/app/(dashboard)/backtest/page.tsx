@@ -44,15 +44,18 @@ const STRATEGIES = [
   },
 ];
 
-function randomResult() {
-  const totalReturn = +(Math.random() * 50 - 10).toFixed(1);
-  const winRate = +(Math.random() * 30 + 40).toFixed(1);
-  const maxDrawdown = +(-(Math.random() * 20 + 5)).toFixed(1);
-  const sharpeRatio = +(Math.random() * 2 + 0.3).toFixed(2);
-  const totalTrades = Math.floor(Math.random() * 60 + 20);
-  const avgHoldDays = +(Math.random() * 10 + 2).toFixed(1);
-
-  return { totalReturn, winRate, maxDrawdown, sharpeRatio, totalTrades, avgHoldDays };
+interface BacktestResult {
+  totalReturn: number;
+  winRate: number;
+  maxDrawdown: number;
+  sharpeRatio: number;
+  totalTrades: number;
+  avgHoldDays: number;
+  dataPoints: number;
+  stockCode: string;
+  startDate: string;
+  endDate: string;
+  strategy: string;
 }
 
 export default function BacktestPage() {
@@ -66,7 +69,8 @@ export default function BacktestPage() {
   const [capital, setCapital] = useState("100000");
   const [frequency, setFrequency] = useState("daily");
   const [running, setRunning] = useState(false);
-  const [results, setResults] = useState<ReturnType<typeof randomResult> | null>(null);
+  const [results, setResults] = useState<BacktestResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   function selectStrategy(s: (typeof STRATEGIES)[0]) {
     setSelected(s);
@@ -81,9 +85,33 @@ export default function BacktestPage() {
   async function runBacktest() {
     setRunning(true);
     setResults(null);
-    await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1000));
-    setResults(randomResult());
-    setRunning(false);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/backtest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stockCode,
+          startDate,
+          endDate,
+          strategy: selected.id,
+          params,
+          capital,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.message || "回测失败");
+      } else {
+        setResults(data);
+      }
+    } catch {
+      setError("网络错误，请稍后重试");
+    } finally {
+      setRunning(false);
+    }
   }
 
   return (
@@ -205,6 +233,16 @@ export default function BacktestPage() {
           </Card>
 
           {/* 回测结果 */}
+          {error && (
+            <Card className="shadow-sm border-red-200">
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-2 text-red-700">
+                  <AlertTriangle className="h-4 w-4" />
+                  <p className="text-sm">{error}</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
           {results && (
             <Card className="shadow-sm border-blue-200">
               <CardHeader>
@@ -212,7 +250,7 @@ export default function BacktestPage() {
                   {selected.name} 回测结果
                 </CardTitle>
                 <CardDescription>
-                  {stockCode} | {startDate} 至 {endDate} | {frequency === "daily" ? "日线" : "周线"}
+                  {results.stockCode} | {results.startDate} 至 {results.endDate} | {results.dataPoints} 条数据
                 </CardDescription>
               </CardHeader>
               <CardContent>

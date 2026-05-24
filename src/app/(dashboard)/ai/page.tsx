@@ -13,28 +13,27 @@ import {
   Eye, EyeOff, Trash2, Loader2,
 } from "lucide-react";
 
-const STOCK_NAMES: Record<string, string> = {
-  "000001": "平安银行", "600519": "贵州茅台", "300750": "宁德时代",
-  "002594": "比亚迪", "601318": "中国平安", "000858": "五粮液",
-};
-
-const MOCK_ANALYSIS = `## 000001 平安银行 技术分析
-
-### 技术面
-- **趋势判断**：股价处于 13.3-13.6 区间震荡整理，短期方向待选择
-- **均线系统**：5 日线上穿 20 日线形成金叉，中期趋势偏多
-- **量价关系**：近期成交量温和放大，显示有资金关注
-- **支撑位/压力位**：支撑 13.00 / 压力 14.20
-
-### 基本面
-- PE 约 5.2 倍，处于银行板块中等偏低水平
-- PB 约 0.65 倍，破净状态，安全边际较高
-- 不良贷款率稳中有降，资产质量改善
-
-### 风险提示
-- 宏观经济下行压力可能影响银行资产质量
-- 净息差收窄趋势尚未逆转
-- 以上分析不构成投资建议，请独立思考`;
+interface AnalysisResult {
+  stockCode: string;
+  latestPrice: number;
+  date: string;
+  indicators: {
+    ma5: number | null;
+    ma10: number | null;
+    ma20: number | null;
+    support: string;
+    resistance: string;
+  };
+  performance: {
+    change5d: number | null;
+    change20d: number | null;
+  };
+  summary: {
+    trend: string;
+    volumeNote: string;
+    signal: string;
+  };
+}
 
 export default function AIPage() {
   const [apiKey, setApiKey] = useState("");
@@ -42,7 +41,8 @@ export default function AIPage() {
   const [savedKey, setSavedKey] = useState<string | null>(null);
   const [stockCode, setStockCode] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
-  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [tab, setTab] = useState("stock");
 
   function saveApiKey() {
@@ -70,17 +70,26 @@ export default function AIPage() {
     if (!stockCode.trim() || stockCode.trim().length !== 6) return;
     setAnalyzing(true);
     setAnalysis(null);
+    setAnalysisError(null);
 
-    // 模拟 AI 分析延迟
-    await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1000));
+    try {
+      const res = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stockCode: stockCode.trim() }),
+      });
 
-    const name = STOCK_NAMES[stockCode.trim()] || stockCode.trim();
-    setAnalysis(
-      MOCK_ANALYSIS.replace("000001 平安银行", `${stockCode.trim()} ${name}`)
-        .replace(/14\.20/g, (Math.random() * 5 + 12).toFixed(2))
-        .replace(/13\.00/g, (Math.random() * 3 + 11).toFixed(2))
-    );
-    setAnalyzing(false);
+      const data = await res.json();
+      if (!res.ok) {
+        setAnalysisError(data.message || "分析失败");
+      } else {
+        setAnalysis(data);
+      }
+    } catch {
+      setAnalysisError("网络错误，请稍后重试");
+    } finally {
+      setAnalyzing(false);
+    }
   }
 
   return (
@@ -195,10 +204,83 @@ export default function AIPage() {
             </div>
 
             {analysis ? (
-              <div className="rounded-lg border bg-gray-50 p-6">
-                <pre className="text-sm whitespace-pre-wrap font-sans leading-relaxed text-gray-800">
-                  {analysis}
-                </pre>
+              <div className="rounded-lg border bg-gray-50 p-6 space-y-4">
+                <div className="flex items-center gap-3">
+                  <Badge className="text-sm px-3 py-1">
+                    {analysis.stockCode}
+                  </Badge>
+                  <span className="text-2xl font-bold tabular-nums">¥{analysis.latestPrice}</span>
+                  <span className="text-xs text-muted-foreground">{String(analysis.date)}</span>
+                  <Badge
+                    variant={
+                      analysis.summary.signal === "偏强"
+                        ? "default"
+                        : analysis.summary.signal === "偏弱"
+                          ? "destructive"
+                          : "secondary"
+                    }
+                  >
+                    {analysis.summary.signal}
+                  </Badge>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded bg-white p-3 border">
+                    <p className="text-xs text-muted-foreground mb-2 font-medium">技术指标</p>
+                    <div className="space-y-1 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">MA5</span>
+                        <span className="font-mono">{analysis.indicators.ma5 ?? "-"}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">MA10</span>
+                        <span className="font-mono">{analysis.indicators.ma10 ?? "-"}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">MA20</span>
+                        <span className="font-mono">{analysis.indicators.ma20 ?? "-"}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">支撑位</span>
+                        <span className="font-mono text-emerald-600">¥{analysis.indicators.support}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">压力位</span>
+                        <span className="font-mono text-red-600">¥{analysis.indicators.resistance}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded bg-white p-3 border">
+                    <p className="text-xs text-muted-foreground mb-2 font-medium">走势研判</p>
+                    <div className="space-y-1 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">趋势</span>
+                        <span>{analysis.summary.trend}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">量能</span>
+                        <span>{analysis.summary.volumeNote}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">5日涨跌</span>
+                        <span className={`font-mono ${(analysis.performance.change5d ?? 0) >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                          {analysis.performance.change5d != null ? `${analysis.performance.change5d >= 0 ? "+" : ""}${analysis.performance.change5d}%` : "-"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">20日涨跌</span>
+                        <span className={`font-mono ${(analysis.performance.change20d ?? 0) >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                          {analysis.performance.change20d != null ? `${analysis.performance.change20d >= 0 ? "+" : ""}${analysis.performance.change20d}%` : "-"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : analysisError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+                <p className="text-sm text-red-700">{analysisError}</p>
               </div>
             ) : (
               <div className="rounded-lg bg-gray-50 p-6 text-center">
