@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { tradeSchema } from "@/lib/validations";
 import {
   calcBuyFee,
   calcSellFee,
@@ -99,21 +100,16 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { stockCode, stockName, type, price, quantity } = body;
+    const parsed = tradeSchema.safeParse(body);
 
-    if (!stockCode || !type || !price || !quantity) {
+    if (!parsed.success) {
       return NextResponse.json(
-        { message: "缺少必要参数：stockCode, type, price, quantity" },
+        { message: parsed.error.issues[0].message },
         { status: 400 }
       );
     }
 
-    if (!["buy", "sell"].includes(type)) {
-      return NextResponse.json(
-        { message: "type 必须为 buy 或 sell" },
-        { status: 400 }
-      );
-    }
+    const { stockCode, stockName, type, price, quantity } = parsed.data;
 
     // 获取账户
     const account = await prisma.virtualAccount.findUnique({
